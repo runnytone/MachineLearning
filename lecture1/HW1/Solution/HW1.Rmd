@@ -1,0 +1,561 @@
+---
+title: "Homework 1 Solution"
+subtitle: ""
+author: ""
+date: ""
+output: pdf_document
+---
+
+
+# Question 1
+
+Here is a one possible solution. 
+
+We first set up parameters and load relevant libraries.
+
+```{r}
+rm(list=ls())
+library(data.table)
+library(kknn)
+
+# Primitives
+N_train=100
+N_test=10000
+```
+
+Next, we write functions for generating data and plotting.
+
+```{r}
+# Function to simulate data
+Simulate <- function(func, N_train, N_test){
+  set.seed(11)
+  n=N_train+N_test
+  x=runif(n, -1, 1)
+  y=func(x)+rnorm(n, mean=0, sd=0.15)
+  dt=data.table(y=y,x=x)
+  tr_idx=sample(1:n, N_train)
+  train=dt[tr_idx,]
+  setkey(train,x)
+  test=dt[-tr_idx,]
+  setkey(test,x)
+  return(list(model=func, full=dt, train=train, test=test))
+}
+
+# Function to create base scatter plot
+Plot <- function(sim, method){
+  # unpack
+  true_model=sim$model
+  train=sim$train
+  if (method=="linear regression"){
+    plot(train$x, train$y, cex=0.5, pch=19, col="grey")
+    title(main="Scatter plot, true relationship, and linear fit")
+    lines(train$x, true_model(train$x), col="black", lwd=2)
+    linear=lm(y~x, data=train)
+    yhat=predict(linear, train)
+    lines(train$x, yhat, col="blue", lty=2, lwd=3)
+    return(linear)
+  } else if (method=="k-nn") {
+    k_vec=2:15
+    #near_list <- vector("list", length(k_vec))
+    fit=matrix(0, nrow=dim(train)[1], ncol=length(k_vec))
+    for (i in 1:length(k_vec)){
+      k=k_vec[i]
+      near <- kknn(y~x, train=train, test=train[,.(x)],k=k, kernel='rectangular')
+      #near_list[[i]]=near
+      fit[,i]=near$fitted
+    }
+    
+    par(mfrow=c(1,2))
+    plot(train$x, train$y, cex=0.5, pch=19, col="grey")
+    title(main="k-nn fit: k=2")
+    lines(train$x, true_model(train$x), col="black", lwd=2)
+    lines(train$x, fit[,1], col="blue", lwd=2)
+    plot(train$x, train$y, cex=0.5, pch=19, col="grey")
+    title(main="k-nn fit: k=12")
+    lines(train$x, true_model(train$x), col="black", lwd=2)
+    lines(train$x, fit[,11], col="blue", lwd=2)
+    return(k_vec)
+  }
+}
+
+
+# Function to plot test set MSE
+PlotTestError <- function(sim, base_plot_ls, base_plot_knn){
+  linear=base_plot_ls
+  k_vec=base_plot_knn
+  train=sim$train
+  test=sim$test
+  testMSE_vec=numeric(length=length(k_vec))
+  for (i in 1:length(k_vec)){
+    near=kknn(y~x, train=train, test=test[,.(x)], k=k_vec[i], kernel='rectangular')
+    testMSE_vec[i]=mean((near$fitted-test$y)^2)
+  }
+  lsMSE=mean((predict(linear, test)-test$y)^2)
+  par(mfrow=c(1,1))
+  plot(log(1/k_vec), testMSE_vec,
+       ylim = c(0.95*min(c(testMSE_vec, lsMSE)),1.05*max(c(testMSE_vec, lsMSE))),
+       type="n")
+  title(main="Test set mean squared error")
+  lines(log(1/k_vec), testMSE_vec, lty=6, lwd=3, col="forestgreen", type="o", cex=0.6 )
+  abline(h=lsMSE, col="black", lty=2)
+}
+```
+
+## Linear model (part 1.1 - 1.5)
+
+Define function
+```{r}
+func_linear <- function(x){1.8*x+2}
+```
+
+Simulate data from the linear function
+
+```{r}
+sim_linear <- Simulate(func_linear, N_train, N_test)
+```
+
+Plot the training dataset, true relationship and best linear fit
+```{r}
+plot_ls<- Plot(sim_linear, method = "linear regression")
+```
+
+Plot k-NN fit with k=2 and k=12 respectively
+```{r}
+plot_knn <- Plot(sim_linear, method="k-nn")
+```
+
+Plot test set MSE
+
+```{r}
+plotMSE <- PlotTestError(sim_linear, plot_ls, plot_knn)
+```
+
+* Observation
+
+Linear regression model outperforms k-NN algorithm for any value of $k$. In fact, when the true relationship is
+linear, it is hard for a non-parametric approach to compete with linear regression. Also notice that when the
+value of $k$ is large, i.e. the model is simple, k-NN performs only a little worse than least square regression. It
+does far worse when $k$ is small.
+
+## Almost linear model (part 1.6)
+
+Define function
+```{r}
+func_almost_linear <- function(x){tanh(1.1*x)+2}
+```
+
+Simulate data and plot
+```{r}
+sim_aslinear <- Simulate(func_almost_linear, N_train, N_test)
+plot_ls_aslinear <- Plot(sim_aslinear, method='linear regression')
+plot_knn_aslinear <- Plot(sim_aslinear, method='k-nn')
+plotMSE_aslinear <- PlotTestError(sim_aslinear, plot_ls_aslinear, plot_knn_aslinear)
+```
+
+
+* Observation
+
+The test MSE for linear regression is superior to that of k-NN for low values of $k$. However, for larger $k$,
+k-NN outperforms linear regression.
+
+
+
+## Strongly nonlinear model (part 1.7)
+
+
+Define function
+```{r}
+func_non_linear <- function(x){sin(2*x)+2}
+```
+
+Simulate data and plot
+```{r}
+sim_nlinear <- Simulate(func_non_linear, N_train, N_test)
+plot_ls_nlinear <- Plot(sim_nlinear, method='linear regression')
+plot_knn_nlinear <- Plot(sim_nlinear, method='k-nn')
+plotMSE_nlinear <- PlotTestError(sim_nlinear, plot_ls_nlinear, plot_knn_nlinear)
+```
+
+
+
+* Observation
+
+When the true relationship is highly non-linear, k-NN gives much better result than linear regression, for all
+values of k. The test MSE of linear regression increases dramatically with the extent of non-linearity while
+that of k-NN changes little.
+
+
+
+## Generate data
+
+```{r }
+Xtrain=matrix(runif(N_train*20, -1, 1), nrow=N_train)
+Xtest=matrix(runif(N_test*20, -1, 1), nrow=N_test)
+Ytrain=sin(2*Xtrain[,1])+2+rnorm(N_train)
+Ytest=sin(2*Xtest[,1])+2+rnorm(N_test)
+
+for (pp in 1:5) {
+  par(mfrow = c(1, 4), mai=c(0.2,0.2,0.2,0.2))
+  for (p in seq((pp-1)*4+1, (pp)*4)) {
+    
+    Xtrain=matrix(runif(N_train*p, -1, 1), nrow=N_train)
+    Xtest=matrix(runif(N_test*p, -1, 1), nrow=N_test)
+    Ytrain=sin(2*Xtrain[,1])+2+0.3*rnorm(N_train)
+    Ytest=sin(2*Xtest[,1])+2+0.3*rnorm(N_test)
+    
+    train=data.table(y=Ytrain, Xtrain[,1:p])
+    colnames(train)=c("y", paste0("x", 1:p))
+    test=data.table(y=Ytest, Xtest[,1:p])
+    colnames(test)=c("y", paste0("x", 1:p))
+    linear=lm(y~., data=train)
+    
+    lsMSE=mean((predict(linear, test)-test$y)^2)
+    k_vec=seq(2, 15, 3)
+    testMSE_vec=numeric(length=length(k_vec))
+    for (i in 1:length(k_vec)){
+      near=kknn(y~., train=train, test=test, k=k_vec[i], kernel='rectangular')
+      testMSE_vec[i]=mean((near$fitted-test$y)^2)
+    }
+    plot(log(1/k_vec), testMSE_vec,
+         ylim = c(0.,1.),
+         type="n")
+    title(main=paste("p = ",p))
+    lines(log(1/k_vec), testMSE_vec, lty=6, lwd=1, col="forestgreen", type="o", cex=0.5 )
+    abline(h=lsMSE, col="black", lty=2)
+  }
+}
+```
+
+* Observation
+
+The increase in dimension only causes a small deterioration in the linear regression test set MSE, but it causes substantial increase in the MSE for k-NN. This is the curse-of-dimensionality problem, which results from the fact that in higher dimensions there is effectively a reduction in sample size. The general rule is linear regression will outperform k-NN method when there is a small number of observations per predictor, though in our simulation exercise this relationship does not hold monotonically.
+
+## Optional bonus question
+
+* Our conclusion concerning the relative performance of linear regression and k-NN as the extent of model non-linearity varies will ramain unchanged.
+
+* We will have a wider range of values of k for which k-NN outperforms linear regression. In real world cases where the true relationship is barely linear, for any given p, an increase in the size of training sample boosts the number of sample points within each small neighborhood, which helps to improve the performance of k-NN. In other words, k-NN can now sustain more complex models without the peril of overfitting.
+
+* Generally having a larger training set improves prediction accuracy in terms of test error by reducting the chance of overfitting.
+
+
+
+# Question 2
+
+
+```{r}
+# set seed
+set.seed(100)
+
+# read data
+download.file("https://github.com/ChicagoBoothML/MLClassData/raw/master/UsedCars/UsedCars.csv",
+              "UsedCars.csv")
+UsedCars <- read.csv(file="UsedCars.csv",head=TRUE,sep=",")
+
+# splitting data into training and validation
+N = dim(UsedCars)[1]
+train_index = sample(N, size = N * 0.75, replace = FALSE)
+train = UsedCars[train_index,]
+test = UsedCars[-train_index, ]
+```
+
+
+## Part 3
+
+```{r}
+fit = lm(price ~ mileage, data = train)
+plot(train$mileage, train$price, xlab = "mileage", ylab = "price", pch = 1, cex = 0.1)
+abline(fit, col = "red", lwd = 2)
+```
+
+The linear regression can not capture the non-linear trend of the data.
+
+
+## Part 4
+
+
+```{r}
+docv = function(x,y,set,nfold=10,doran=TRUE,verbose=TRUE,...)
+{
+  #a little error checking
+  x = as.matrix(x)
+  set = matrix(set, ncol = 1)
+  if(!(is.matrix(x) | is.data.frame(x))) {cat('error in docv: x is not a matrix or data frame\n'); return(0)}
+  if(!(is.vector(y))) {cat('error in docv: y is not a vector\n'); return(0)}
+  if(!(length(y)==nrow(x))) {cat('error in docv: length(y) != nrow(x)\n'); return(0)}
+  
+  nset = nrow(set); 
+  n=length(y) #get dimensions
+  
+  if(n==nfold) doran=FALSE #no need to shuffle if you are doing them all.
+  cat('in docv: nset,n,nfold: ',nset,n,nfold,'\n')
+  lossv = rep(0,nset) #return values
+  if(doran) {ii = sample(1:n,n); y=y[ii]; x=x[ii,,drop=FALSE]} #shuffle rows
+  
+  fs = round(n/nfold) # fold size
+  for(i in 1:nfold) { #fold loop
+    bot = (i-1)*fs+1; 
+    top = ifelse(i==nfold,n,i*fs); 
+    ii = bot:top
+    if(verbose) cat('on fold: ',i,', range: ',bot,':',top,'\n')
+    xin = x[-ii,,drop=FALSE]; 
+    yin=y[-ii]; 
+    xout=x[ii,,drop=FALSE]; 
+    yout=y[ii]
+    xin = as.vector(xin)
+    xout = as.vector(xout)
+    datain = data.frame(x = xin, y = yin)
+    dataout = data.frame(x = xout, y = yout)
+    for(k in 1:nset) 
+    { #setting loop
+      fit = lm(y ~ poly(x, set[k,]), data = datain)
+      yhat = predict(fit,  newdata = dataout)
+      lossv[k]=lossv[k]+mean((yout-yhat)^2)
+    } 
+  } 
+  return(lossv)
+}
+
+
+
+#### run cv
+D = c(1,2,3,4,5,6, 7, 8, 9) # potential degrees
+errors = docv(train$mileage, train$price, D, nfold = 10)
+plot(D, errors, xlab = "highest degree", ylab = "Errors")
+best.degree = D[which.min(errors)] # find the best degree
+
+best.degree
+
+fit = lm(price ~ poly(mileage, 7), data = train)
+plot(train$mileage, train$price, xlab = "mileage", ylab = "price", pch = 1, cex = 0.1)
+fitted = predict(fit, newdata = data.frame(mileage = sort(train$mileage)))
+lines(sort(train$mileage),fitted,col="red",lwd=2, cex.lab=2)
+
+# error
+sqrt(mean((test$price -predict(fit, test))^2))
+```
+
+
+Due to randomness of the code, the result might be different for each
+run.
+
+## Part 5
+
+```{r}
+##########
+## kNN
+## Warning: super slow
+##########
+
+library(MASS)
+library(kknn)
+download.file("https://raw.githubusercontent.com/ChicagoBoothML/HelpR/master/docv.R", "docv.R")
+source("docv.R") #this has docvknn used below
+set.seed(99) #always set the seed! 
+
+kv = 1:20 * 50   #these are the k values (k as in kNN) we will try
+# since the possible k might be very large, we pick k every 50, from 50 to 1000
+
+#does cross-validation for training data (x,y).
+
+cv = docvknn(matrix(train$mileage,ncol=1),train$price,kv,nfold=10)
+plot(kv, cv)
+kbest = kv[which.min(cv)]
+
+kfbest = kknn(price~mileage,train,data.frame(mileage=sort(train$mileage)),k=kbest,kernel = "rectangular")
+plot(train$mileage, train$price, xlab = "mileage", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(train$mileage),kfbest$fitted,col="red",lwd=2, cex.lab=2)
+
+# error
+kfbest = kknn(price~mileage,train,test,k=kbest,kernel = "rectangular")
+sqrt(mean((test$price - kfbest$fitted.values)^2))
+
+##########
+## Tree
+##########
+
+library(rpart)      # package for trees
+library(rpart.plot) # package that enhances plotting capabilities for rpart
+library(MASS)  # contains boston housing data
+
+
+big.tree = rpart(price~mileage, data=train,
+      control=rpart.control(minsplit=5,cp=0.0001,xval=10))
+
+nbig = length(unique(big.tree$where))
+cat('size of big tree: ',nbig,'\n')
+
+(cptable = printcp(big.tree))
+(bestcp = cptable[ which.min(cptable[,"xerror"]), "CP" ])   # this is the optimal cp parameter
+
+plotcp(big.tree) # plot results
+
+# show fit from some trees
+oo = order(train$mileage)
+cpvec = c(bestcp / 2, bestcp,.0157)
+
+par(mfrow=c(3,2))
+for(i in 1:3) {
+  plot(train$mileage,train$price,pch=16,col='blue',cex=.5)
+  ptree = prune(big.tree,cp=cpvec[i])
+  pfit = predict(ptree)
+  lines(train$mileage[oo],pfit[oo],col='red',lwd=2)
+  title(paste('alpha = ',round(cpvec[i],3)))
+  rpart.plot(ptree)
+}
+
+par(mfrow=c(1,1))
+best.tree = prune(big.tree,cp=bestcp)
+rpart.plot(best.tree)
+
+plot(train$mileage, train$price, xlab = "mileage", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(train$mileage),predict(best.tree)[oo],col="red",lwd=2,cex.lab=2)
+
+# error
+sqrt(mean((test$price - predict(best.tree, test))^2))
+```
+
+From figures above, I would choose kNN because itâ€™s robust and smooth. Tree and high-order polynomials
+are less smooth and very sensitive to extreme values.
+
+
+## Part 6
+
+```{r}
+
+###############################################################################
+# 6
+# Add one more variable
+
+##########
+## kNN
+## Warning: super slow
+##########
+
+
+
+library(MASS)
+library(kknn)
+set.seed(99) #always set the seed! 
+
+kv = 1:20 * 10  
+
+cv = docvknn(scale(as.matrix(cbind(train$mileage, train$year))),train$price,kv,nfold=10)
+plot(kv, cv)
+kbest = kv[which.min(cv)]
+
+train.scaled = train
+train.scaled$year = scale(train.scaled$year)
+train.scaled$mileage = scale(train.scaled$mileage)
+test.scaled = test
+test.scaled$year = scale(test.scaled$year)
+test.scaled$mileage = scale(test.scaled$mileage)
+
+kfbest = kknn(price~mileage+price,train.scaled,data.frame(mileage=sort(train.scaled$mileage)),k=kbest,kernel = "rectangular")
+plot(train.scaled$mileage, train$price, xlab = "mileage", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(train.scaled$mileage),kfbest$fitted,col="red",lwd=2, cex.lab=2)
+
+
+
+# error
+kfbest = kknn(price~mileage,train.scaled,test.scaled,k=kbest,kernel = "rectangular")
+sqrt(mean((test.scaled$price - kfbest$fitted.values)^2))
+
+
+
+##########
+## Tree
+##########
+library(rpart)      # package for trees
+library(rpart.plot) # package that enhances plotting capabilities for rpart
+library(MASS)  # contains boston housing data
+
+
+big.tree = rpart(price~mileage+price, data=train,
+                 control=rpart.control(minsplit=5,cp=0.0001,xval=10))
+
+nbig = length(unique(big.tree$where))
+cat('size of big tree: ',nbig,'\n')
+
+(cptable = printcp(big.tree))
+(bestcp = cptable[ which.min(cptable[,"xerror"]), "CP" ])   # this is the optimal cp parameter
+
+plotcp(big.tree) # plot results
+
+# show fit from some trees
+oo = order(train$mileage)
+cpvec = c(bestcp / 2, bestcp,.0157)
+
+par(mfrow=c(3,2))
+for(i in 1:3) {
+  plot(train$mileage,train$price,pch=16,col='blue',cex=.5)
+  ptree = prune(big.tree,cp=cpvec[i])
+  pfit = predict(ptree)
+  lines(train$mileage[oo],pfit[oo],col='red',lwd=2)
+  title(paste('alpha = ',round(cpvec[i],3)))
+  rpart.plot(ptree)
+}
+
+par(mfrow=c(1,1))
+best.tree = prune(big.tree,cp=bestcp)
+rpart.plot(best.tree)
+
+plot(train$mileage, train$price, xlab = "mileage", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(train$mileage),predict(best.tree)[oo],col="red",lwd=2,cex.lab=2)
+
+# error
+sqrt(mean((test$price - predict(best.tree, test))^2))
+
+```
+
+Comparing with one variable case, now k of kNN and optimal tree size are smaller. Both method get lower RMSE with one more variable.
+
+## Part 7
+
+
+```{r}
+big.tree = rpart(price~., data=train,
+                 control=rpart.control(minsplit=5,cp=0.0001,xval=10))
+
+nbig = length(unique(big.tree$where))
+cat('size of big tree: ',nbig,'\n')
+
+(cptable = printcp(big.tree))
+(bestcp = cptable[ which.min(cptable[,"xerror"]), "CP" ])   # this is the optimal cp parameter
+
+plotcp(big.tree) # plot results
+
+# show fit from some trees
+oo = order(train$mileage)
+cpvec = c(bestcp / 2, bestcp,.0157)
+
+par(mfrow=c(3,2))
+for(i in 1:3) {
+  plot(train$mileage,train$price,pch=16,col='blue',cex=.5)
+  ptree = prune(big.tree,cp=cpvec[i])
+  pfit = predict(ptree)
+  lines(train$mileage[oo],pfit[oo],col='red',lwd=2)
+  title(paste('alpha = ',round(cpvec[i],3)))
+  rpart.plot(ptree)
+}
+
+par(mfrow=c(1,1))
+best.tree = prune(big.tree,cp=bestcp)
+rpart.plot(best.tree)
+
+plot(train$mileage, train$price, xlab = "mileage", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(train$mileage),predict(best.tree)[oo],col="red",lwd=2,cex.lab=2)
+
+# error
+sqrt(mean((test$price - predict(best.tree, test))^2))
+```
+
+## Bonus
+
+
+One possible procedure
+
+* For each fixed $k$, there are $p \choose k$ possible k-variable models. Run cross validation and compute RMSE for all possible models. The model with smallest RMSE is the optimal k-variable model.
+
+* For all $k = 1, \ldots, p$. Compare RMSE of all optimal k-variable models and find the one with smallest RMSE.
+

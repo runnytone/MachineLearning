@@ -1,0 +1,379 @@
+---
+title: "BUS 41204 Review Session 2"
+subtitle: "Examples using k-NN and Trees"
+author: |
+    | Chaoxing Dai
+    | chaoxingdai@chicagobooth.edu
+date: "01/13/2018"
+fontsize: 10pt
+output: 
+    pdf_document:
+        fig_width: 6
+        fig_height: 4
+---
+
+# Plan
+
+* Classification using k-NN
+
+* Solve Homework 1 Q2 using
+    - Linear and Polynomial Regression
+    - k-NN
+    - Regression Tree
+    (with cross-validation on a different dataset)
+
+# Packages
+
+```{r}
+#List the packages we need, install if missing, then load all of them
+PackageList =c('MASS','data.table','tree','kknn','rpart','rpart.plot') 
+NewPackages=PackageList[!(PackageList %in% 
+                            installed.packages()[,"Package"])]
+if(length(NewPackages)) install.packages(NewPackages)
+
+lapply(PackageList,require,character.only=TRUE)#array function
+
+download.file("https://raw.githubusercontent.com/ChicagoBoothML/HelpR/master/docv.R", "docv.R")
+source("docv.R") #this has docvknn used below
+
+set.seed(2018) #Always set the seed for reproducibility
+```
+
+
+# Utility Function
+```{r}
+#Cross-Validation Function #*IMP*#
+docvlm = function(x,y,set,nfold=10,doran=TRUE,verbose=TRUE,...)
+{
+  #a little error checking
+  x = as.matrix(x)
+  set = matrix(set, ncol = 1)
+  if(!(is.matrix(x) | is.data.frame(x))) {cat('error in docv: x is not a matrix or data frame\n'); return(0)}
+  if(!(is.vector(y))) {cat('error in docv: y is not a vector\n'); return(0)}
+  if(!(length(y)==nrow(x))) {cat('error in docv: length(y) != nrow(x)\n'); return(0)}
+  
+  nset = nrow(set); 
+  n=length(y) #get dimensions
+  
+  if(n==nfold) doran=FALSE #no need to shuffle if you are doing them all.
+  cat('in docv: nset,n,nfold: ',nset,n,nfold,'\n')
+  lossv = rep(0,nset) #return values
+  if(doran) {ii = sample(1:n,n); y=y[ii]; x=x[ii,,drop=FALSE]} #shuffle rows
+  
+  fs = round(n/nfold) # fold size
+  for(i in 1:nfold) { #fold loop
+    bot = (i-1)*fs+1; 
+    top = ifelse(i==nfold,n,i*fs); 
+    ii = bot:top
+    if(verbose) cat('on fold: ',i,', range: ',bot,':',top,'\n')
+    xin = x[-ii,,drop=FALSE]; 
+    yin=y[-ii]; 
+    xout=x[ii,,drop=FALSE]; 
+    yout=y[ii]
+    xin = as.vector(xin)
+    xout = as.vector(xout)
+    datain = data.frame(x = xin, y = yin)
+    dataout = data.frame(x = xout, y = yout)
+    for(k in 1:nset) 
+    { #setting loop
+      fit = lm(y ~ poly(x, set[k,]), data = datain)
+      yhat = predict(fit,  newdata = dataout)
+      lossv[k]=lossv[k]+mean((yout-yhat)^2)
+    } 
+  } 
+  return(lossv)
+}
+```
+
+
+
+# Classification using K-NN
+
+Data: measurements of Forensic Glass Fragments
+
+```{r}
+data(fgl) 
+help(fgl) # For description
+head(fgl,n=3)
+summary(fgl)
+
+```
+
+# Classification using K-NN
+
+Code the 7 types into 3 main categories
+```{r}
+n=nrow(fgl)
+y = rep(3,n)
+y[fgl$type=="WinF"]=1
+y[fgl$type=="WinNF"]=2
+y = as.factor(y) #*IMP*#
+levels(y) = c("WinF","WinNF","Other") #*IMP*#
+print(table(y,fgl$type)) #confusion matrix
+
+
+x = cbind(fgl$RI,fgl$Na,fgl$Al)
+colnames(x) = c("RI","Na","Al") # Refractive Index, Sodium, Aluminium
+
+ddf=data.frame(type=y,x)
+
+```
+
+
+# Classification using K-NN
+
+Run the model.
+```{r, eval=FALSE}
+fit0 = kknn(type~.,
+            ddf,
+            ddf,
+            k=10,
+            scale=TRUE,
+            kernel = "rectangular")
+print(table(fit0$fitted,ddf$type)) #confusion matrix
+
+```
+
+Predicted probabilities
+```{r, eval=FALSE}
+fitdf = data.frame(type=ddf$type,fit0$prob) # row sum is 1
+names(fitdf)[2:4] = c("ProbWinF","ProbWinNF","ProbOther")
+head(fitdf,n=3)
+par(mfrow=c(1,3))
+plot(ProbWinF~type,fitdf,col=c(grey(.5),2:3),cex.lab=1.4) #*IMP*#
+plot(ProbWinNF~type,fitdf,col=c(grey(.5),2:3),cex.lab=1.4)
+plot(ProbOther~type,fitdf,col=c(grey(.5),2:3),cex.lab=1.4)
+```
+
+
+# Boston Housing Data
+The Boston Housing data is contained in "MASS" package, which is "Boston"
+
+```{r}
+data(Boston) #Load data
+help(Boston) #For description
+sapply(Boston, class) #Check variables Type
+summary(Boston) #Summary statistics
+
+N=dim(Boston)[1]
+p=dim(Boston)[2]-1  #One of the columns is response, price
+
+
+train_indices = sample(N, size = N * 0.75, replace = FALSE) #random partition #*IMP*#
+
+boston_train= Boston[train_indices,]
+boston_test = Boston[-train_indices,]
+
+```
+
+# Simple Linear Regression
+```{r}
+fit = lm(medv ~ lstat, data = boston_train)
+plot(boston_train$lstat, boston_train$medv, xlab = "% lower status of the population", ylab = "Medium Value of Homes in $1000's", pch = 1, cex = 0.1)
+abline(fit, col = "red", lwd = 2)
+
+cat('RMSE is ',sqrt(mean((boston_test$medv -predict(fit, boston_test))^2)),'\n') #*IMP*#
+
+
+```
+
+
+# Polynomial Regression with Cross-Validation
+
+
+```{r}
+
+D = seq(6)
+errors = docvlm(boston_train$lstat, boston_train$medv, D, nfold = 10)
+
+
+plot(D, errors, xlab = "highest degree", ylab = "Errors")
+bestdegree=D[which.min(errors)] # find the best degree
+cat('The best degree is : ',bestdegree,'\n')
+
+fit2 = lm(medv ~ poly(lstat, bestdegree), data = boston_train)
+
+
+fitted = predict(fit2, newdata = data.frame(lstat = sort(boston_train$lstat)))
+plot(boston_train$lstat, boston_train$medv, xlab = "lstat", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(boston_train$lstat),fitted,col="red",lwd=2, cex.lab=2)
+
+cat('RMSE is ',sqrt(mean((boston_test$medv -predict(fit2, boston_test))^2)),'\n')
+```
+
+
+# k-NN 
+
+```{r}
+
+
+kv=seq(5,50,5)
+
+cv = docvknn(matrix(boston_train$lstat,ncol=1),boston_train$medv,kv,nfold=10)
+plot(kv, cv)
+kbest = kv[which.min(cv)]
+
+
+# Re-Fit the model using best k
+fit3 = kknn(medv~lstat,   # Formula
+            boston_train, # Training set
+            data.frame(lstat=sort(boston_train$lstat)),# Test set
+            k=kbest,      #Number of neighbors considered
+            scale=TRUE,   # Scale variable to have equal sd.
+            kernel = "rectangular") # Standard unweighted knn
+
+
+plot(boston_train$lstat, boston_train$medv, xlab = "lstat", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(boston_train$lstat),fit3$fitted,col="red",lwd=2, cex.lab=2)
+
+
+fit3T = kknn(medv~lstat,boston_train,boston_test,k=kbest,kernel = "rectangular")
+cat('RMSE is ',sqrt(mean((boston_test$medv -fit3T$fitted.values)^2)),'\n')
+```
+
+# Regresssion Trees
+
+```{r}
+fit4 = rpart(medv~lstat,       #Formula
+             data=boston_train,#Data
+              control=rpart.control(minsplit=5,#the minimum number of observations that must exist in a node for split attempt 
+                                    cp=0.0001, #complexity, the lower, the larger the tree is 
+                                    xval=10   #number of cross validations
+                                    ))
+
+nbig = length(unique(fit4$where)) #where:n integer vector of the same length as the number of observations in the root node, containing the row number of frame corresponding to the leaf node that each observation falls into.
+cat('size of big tree: ',nbig,'\n')
+
+(cptable = printcp(fit4))
+(bestcp = cptable[ which.min(cptable[,"xerror"]), "CP" ])   # this is the optimal cp parameter
+
+plotcp(fit4) # plot results
+
+# show fit from some trees
+oo = order(boston_train$lstat)
+cpvec = c(bestcp / 4, bestcp,bestcp*4)
+
+par(mfrow=c(3,2))
+for(i in 1:3) {
+  plot(boston_train$lstat,boston_train$medv,pch=16,col='blue',cex=.5)
+  ptree = prune(fit4,cp=cpvec[i])
+  pfit = predict(ptree)
+  lines(boston_train$lstat[oo],pfit[oo],col='red',lwd=2)
+  title(paste('alpha = ',round(cpvec[i],3)))
+  rpart.plot(ptree)
+}
+
+par(mfrow=c(1,1))
+fit4B = prune(fit4,cp=bestcp) # Determines a nested sequence of subtrees of the supplied rpart object by recursively snipping off the least important splits, based on the complexity parameter (cp).
+
+rpart.plot(fit4B)
+
+plot(boston_train$lstat, boston_train$medv, xlab = "lstat", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(boston_train$lstat),predict(fit4B)[oo],col="red",lwd=2,cex.lab=2)
+
+# error
+cat('RMSE is ',sqrt(mean((boston_test$medv -predict(fit4B, boston_test))^2)),'\n')
+```
+
+
+# Adding Variables: k-NN
+
+```{r}
+kv=seq(5,50,5)
+
+cv = docvknn(as.matrix(cbind(boston_train$lstat, boston_train$crim)),boston_train$medv,kv,nfold=10)
+
+plot(kv, cv)
+kbest = kv[which.min(cv)]
+
+
+# Re-Fit the model using best k
+fit5 = kknn(medv~lstat+crim,   #Formula
+            train=boston_train, # Training Set
+            test=boston_train,#test=data.frame(lstat=sort(boston_train$lstat)),# Test set
+            k=kbest,      # Number of neighbors considered
+            scale=TRUE,
+            kernel = "rectangular") # Standard unweighted knn
+
+
+plot(boston_train$lstat, boston_train$medv, xlab = "lstat", ylab = "price", pch = 1, cex = 0.1)
+ord=order(boston_train$lstat)
+lines(boston_train$lstat[ord],fit5$fitted[ord],col="red",lwd=2, cex.lab=2)
+
+
+fit5T = kknn(medv~lstat+crim,boston_train,boston_test,k=kbest,kernel = "rectangular")
+cat('RMSE is ',sqrt(mean((boston_test$medv -fit5T$fitted.values)^2)),'\n')
+```
+
+
+
+
+# Adding Variables: Regression Trees
+```{r}
+fit6 = rpart(medv~lstat+crim,       #Formula
+             data=boston_train,#Data
+              control=rpart.control(minsplit=5,#the minimum number of observations that must exist in a node for split attempt 
+                                    cp=0.0001, #complexity, the lower, the larger the tree is 
+                                    xval=10   #number of cross validations
+                                    ))
+
+nbig = length(unique(fit6$where))
+cat('size of big tree: ',nbig,'\n')
+
+(cptable = printcp(fit6))
+(bestcp = cptable[ which.min(cptable[,"xerror"]), "CP" ])   # this is the optimal cp parameter
+
+plotcp(fit6) # plot results
+
+# show fit from some trees
+cpvec = c(bestcp / 2, bestcp,.0157)
+
+par(mfrow=c(3,2))
+for(i in 1:3) {
+  plot(boston_train$lstat,boston_train$medv,pch=16,col='blue',cex=.5)
+  ptree = prune(fit6,cp=cpvec[i])
+  pfit = predict(ptree)
+  lines(boston_train$lstat[oo],pfit[oo],col='red',lwd=2)
+  title(paste('alpha = ',round(cpvec[i],3)))
+  rpart.plot(ptree)
+}
+
+par(mfrow=c(1,1))
+fit6B = prune(fit6,cp=bestcp)
+rpart.plot(fit6B)
+
+plot(boston_train$lstat, boston_train$medv, xlab = "lstat", ylab = "price", pch = 1, cex = 0.1)
+lines(sort(boston_train$lstat),predict(fit4B)[oo],col="red",lwd=2,cex.lab=2)
+
+# error
+cat('RMSE is ',sqrt(mean((boston_test$medv -predict(fit6B, boston_test))^2)),'\n')
+```
+
+
+
+# Adding All Variables: Regression Trees
+```{r}
+fit7 = rpart(medv~.,       #Formula
+             data=boston_train,#Data
+              control=rpart.control(minsplit=5,#the minimum number of observations that must exist in a node for split attempt 
+                                    cp=0.0001, #complexity, the lower, the larger the tree is 
+                                    xval=10   #number of cross validations
+                                    ))
+```
+
+
+
+
+# References
+
+Data Description:
+
+https://www.cs.toronto.edu/~delve/data/boston/bostonDetail.html
+
+
+Package manuals:
+
+https://cran.r-project.org/web/packages/kknn/kknn.pdf
+https://cran.r-project.org/web/packages/rpart/rpart.pdf
+
+

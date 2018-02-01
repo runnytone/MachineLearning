@@ -1,0 +1,240 @@
+---
+title: "Machine Learning"
+subtitle: "HW1"
+author: |
+    | Xin Cheng
+    | runnytone@uchicago.edu
+date: "01/20/2018"
+fontsize: 10pt
+output: 
+    pdf_document:
+        fig_width: 6
+        fig_height: 4
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#List the packages we need, install if missing, then load all of them
+PackageList =c('MASS','data.table','tree','kknn','rpart','rpart.plot') 
+NewPackages=PackageList[!(PackageList %in% 
+                            installed.packages()[,"Package"])]
+if(length(NewPackages)) install.packages(NewPackages)
+
+lapply(PackageList,require,character.only=TRUE)#array function
+
+download.file("https://raw.githubusercontent.com/ChicagoBoothML/HelpR/master/docv.R", "docv.R")
+source("docv.R") #this has docvknn used below
+
+set.seed(2018) #Always set the seed for reproducibility
+```
+# Q2
+## Q2.1
+```{r data}
+raw.data <- read.csv(url("https://github.com/ChicagoBoothML/MLClassData/raw/master/UsedCars/UsedCars.csv"))
+#View(raw.data)
+```
+
+## Q2.2
+```{r Q2.2}
+nrow.data <- nrow(raw.data)
+train_indices = sample(nrow.data, size = nrow.data * 0.75, replace = FALSE)
+data.train <- raw.data[train_indices,]
+data.test <- raw.data[-train_indices,]
+```
+
+## Q2.3
+
+```{r Q2.3}
+ls <- lm(price ~ mileage, data.train)
+
+plot(data.train$mileage, data.train$price, main = "a scatter plot of price vs mileage", xlab = "mileage", ylab = "price")+
+abline(ls$coef, col="blue", lwd = 2, lty = "dashed")
+```
+## Q2.4
+```{r Q2.4, eval=FALSE, include=FALSE}
+set.seed(2018) #always set the seed! 
+source("docv.R")
+dvec <- 1:10
+data.train <- raw.data[,c(1,4)]
+for (i in dvec) {
+  data.train <- cbind(data.train, (data.train$mileage)^dvec[i])
+}
+
+data.train <- data.train[, -2]
+names(data.train)[-1] <- paste0("md",dvec)
+data.train.x <- as.matrix(data.train[,-1])
+
+cv.poly <- c()
+cv.poly <- docvpoly(data.train.x, data.train$price, dvec, nfold=10, doran=TRUE, verbose=TRUE)
+
+par(mfrow=c(1,2))
+plot(dvec, sqrt(cv.poly/(nrow(raw.data))), xlab="d", ylab="MSE", type="l")
+cat("best degreee is", dvec[which.min(cv.poly)])
+
+bestD.lm <- lm(price~., data.train[,1:dvec[which.min(cv.poly)]])
+bestD.x <- data.train[,1:dvec[which.min(cv.poly)]]
+prediction <- predict(bestD.lm, bestD.x[sort(bestD.x$md1),])
+
+plot(raw.data$mileage, raw.data$price)+
+abline(data.train[,2], prediction, col="blue", lwd = 3, lty = "dashed")
+```
+
+## Q2.5.a : knn
+```{r Q2.5.a, eval=FALSE, include=FALSE}
+source("docv.R")
+library(kknn)
+set.seed(2018) #always set the seed! 
+kvec <- seq(400, by = 20, 600)
+data.train <- raw.data[,c(1,4)]
+
+#docvknn(matrix x, vector y,vector of k values, number of folds)
+#the function returns data in the Sum of Squares format
+cv <- c()
+cv <- docvknn(as.matrix(data.train[,-1]), data.train$price, kvec, nfold=10)
+
+par(mfrow=c(1,2))
+plot(kvec, cv, xlab="k", ylab="cv")
+
+cat("best k is", kvec[which.min(cv)])
+
+best.kknn <- kknn(price~., data.train, data.frame(mileage=sort(data.train$mileage)), k=kvec[which.min(cv)], kernel = "rectangular")
+
+plot(raw.data$mileage, raw.data$price)
+lines(sort(data.train[,2]), best.kknn$fitted.values, col="blue", lwd = 3, lty = "dashed")
+
+```
+
+## Q2.5.b : regression tree
+```{r Q2.5.B}
+set.seed(2018) #always set the seed! 
+data.train <- raw.data[,c(1,4)]
+
+tree <- rpart(price~.,      #Formula
+             data = data.train ,#Data
+             control = rpart.control(minsplit=5,#the minimum number of observations that must exist in a node for split attempt 
+             cp=0.0001, #complexity, the lower, the larger the tree is 
+             xval=10   #number of cross validations
+             ))
+
+nbig <- length(unique(tree$where)) 
+cat('size of big tree: ',nbig,'\n')
+
+(cptable <- printcp(tree))
+bestcp <- cptable[ which.min(cptable[,"xerror"]), "CP" ] # this is the optimal cp parameter
+
+plotcp(tree) # plot results
+
+# show fit from some trees
+oo = order(data.train$mileage)
+cpvec = c(bestcp / 4, bestcp,bestcp*4)
+
+par(mfrow=c(1,2))
+plot(data.train$mileage, data.train$price, pch=16, col='blue', cex=.5)
+ptree = prune(tree, cp=bestcp)
+pfit = predict(ptree)
+lines(data.train$mileage[oo],pfit[oo],col='red',lwd=2)
+title(paste('alpha = ',cpvec))
+rpart.plot(ptree)
+
+cat('RMSE is ',sqrt(mean((data.train$price -predict(tree, data.train))^2)),'\n')
+```
+
+## Q2.6.A
+```{r Q2.6.A, eval=FALSE, include=FALSE}
+set.seed(2018) #always set the seed! 
+kvec <- seq(400, by = 20, 600)
+data.train <- raw.data[,c(1,4,5)]
+
+#docvknn(matrix x, vector y,vector of k values, number of folds)
+#the function returns data in the Sum of Squares format
+cv <- c()
+cv <- docvknn(as.matrix(data.train[,-1]), data.train$price, kvec, nfold=10)
+
+par(mfrow=c(1,2))
+plot(kvec, cv, xlab="k", ylab="cv")
+
+cat("best k is", kvec[which.min(cv)])
+
+oo <- sort(data.train$mileage)
+best.kknn <- kknn(price~., data.train[oo,], data.train[oo,-1], k=kvec[which.min(cv)], kernel = "rectangular")
+
+
+
+plot(raw.data$mileage, raw.data$price)
+lines(data.train[oo,2], best.kknn$fitted.values, col="blue", lwd = 3, lty = "dashed")
+```
+
+## Q2.6.B
+```{r echo=FALSE}
+set.seed(2018) #always set the seed! 
+data.train <- raw.data[,c(1,4,5)]
+
+tree <- rpart(price~.,      #Formula
+             data = data.train ,#Data
+             control = rpart.control(minsplit=5,#the minimum number of observations that must exist in a node for split attempt 
+             cp=0.0001, #complexity, the lower, the larger the tree is 
+             xval=10   #number of cross validations
+             ))
+
+nbig <- length(unique(tree$where)) 
+cat('size of big tree: ',nbig,'\n')
+
+(cptable <- printcp(tree))
+bestcp <- cptable[ which.min(cptable[,"xerror"]), "CP" ] # this is the optimal cp parameter
+
+plotcp(tree) # plot results
+
+# show fit from some trees
+oo = order(data.train$mileage)
+cpvec = c(bestcp / 4, bestcp,bestcp*4)
+
+par(mfrow=c(1,2))
+plot(data.train$mileage, data.train$price, pch=16, col='blue', cex=.5)
+ptree = prune(tree, cp=bestcp)
+pfit = predict(ptree)
+lines(data.train$mileage[oo],pfit[oo],col='red',lwd=2)
+title(paste('alpha = ',cpvec))
+rpart.plot(ptree)
+
+cat('RMSE is ',sqrt(mean((data.train$price -predict(tree, data.train))^2)),'\n')
+```
+
+## Q 2.7
+```{r}
+set.seed(2018) #always set the seed! 
+data.train <- raw.data
+
+tree <- rpart(price~.,      #Formula
+             data = data.train ,#Data
+             control = rpart.control(minsplit=5,#the minimum number of observations that must exist in a node for split attempt 
+             cp=0.0001, #complexity, the lower, the larger the tree is 
+             xval=10   #number of cross validations
+             ))
+
+nbig <- length(unique(tree$where)) 
+cat('size of big tree: ',nbig,'\n')
+
+(cptable <- printcp(tree))
+bestcp <- cptable[ which.min(cptable[,"xerror"]), "CP" ] # this is the optimal cp parameter
+
+plotcp(tree) # plot results
+
+# show fit from some trees
+oo = order(data.train$mileage)
+cpvec = c(bestcp / 4, bestcp,bestcp*4)
+
+par(mfrow=c(1,2))
+plot(data.train$mileage, data.train$price, pch=16, col='blue', cex=.5)
+ptree = prune(tree, cp=bestcp)
+pfit = predict(ptree)
+lines(data.train$mileage[oo],pfit[oo],col='red',lwd=2)
+title(paste('alpha = ',cpvec))
+rpart.plot(ptree)
+
+cat('RMSE is ',sqrt(mean((data.train$price -predict(tree, data.train))^2)),'\n')
+```
+
+
